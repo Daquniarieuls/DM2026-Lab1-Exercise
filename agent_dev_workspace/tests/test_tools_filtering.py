@@ -60,3 +60,91 @@ def test_variance_filter_tool():
         var_val = row["variance"]
         assert feature in expected_variances
         assert var_val == pytest.approx(expected_variances[feature], abs=1e-4)
+
+
+def test_pearson_filter_tool_known_answer_6():
+    # Fresh session per test function to avoid shared state mutations
+    session = SessionState()
+
+    premade_tools, _ = load_workspace_tools("premade_tools", session)
+    load_dataset_tool = next(t for t in premade_tools if t.name == "load_dataset_tool")
+    load_dataset_tool.invoke({
+        "file_path": "agent_dev/sample_fixture.csv",
+        "text_column": "text",
+        "label_column": "label"
+    })
+
+    dtm_tools = make_dtm_tools(session)
+    build_dtm_tool = next(t for t in dtm_tools if t.name == "build_dtm_tool")
+    build_dtm_tool.invoke({})
+
+    filtering_tools = make_filtering_tools(session)
+    pearson_filter_tool = next(t for t in filtering_tools if t.name == "pearson_filter_tool")
+
+    # Known answer 6 Pearson r with target_class="catB" on sample_fixture.csv
+    expected_pearson_r = {
+        "alpha": -0.6882,
+        "always": 0.3780,
+        "beta": -0.7746,
+        "delta": 1.0000,
+        "gamma": 0.8307,
+    }
+
+    result = pearson_filter_tool.invoke({"target_class": "catB", "threshold": 0.0})
+
+    assert result["status"] == "success"
+    assert result["target_class"] == "catB"
+    assert result["total_terms"] == 5
+
+    stored_result = session.results_store[result["result_id"]]
+    full_report = stored_result["full_report"]
+
+    for _, row in full_report.iterrows():
+        feature = row["feature"]
+        r_val = row["pearson_r"]
+        assert feature in expected_pearson_r
+        assert r_val == pytest.approx(expected_pearson_r[feature], abs=1e-3)
+
+
+def test_spearman_filter_tool_known_answer_6():
+    # Fresh session per test function to avoid shared state mutations
+    session = SessionState()
+
+    premade_tools, _ = load_workspace_tools("premade_tools", session)
+    load_dataset_tool = next(t for t in premade_tools if t.name == "load_dataset_tool")
+    load_dataset_tool.invoke({
+        "file_path": "agent_dev/sample_fixture.csv",
+        "text_column": "text",
+        "label_column": "label"
+    })
+
+    dtm_tools = make_dtm_tools(session)
+    build_dtm_tool = next(t for t in dtm_tools if t.name == "build_dtm_tool")
+    build_dtm_tool.invoke({})
+
+    filtering_tools = make_filtering_tools(session)
+    spearman_filter_tool = next(t for t in filtering_tools if t.name == "spearman_filter_tool")
+
+    # Known answer 6 Spearman r with target_class="catB" on sample_fixture.csv
+    expected_spearman_r = {
+        "alpha": -0.7500,
+        "always": 0.3780,
+        "beta": -0.7746,
+        "delta": 1.0000,
+        "gamma": 0.9363,
+    }
+
+    result = spearman_filter_tool.invoke({"target_class": "catB", "threshold": 0.0})
+
+    assert result["status"] == "success"
+    assert result["target_class"] == "catB"
+    assert result["total_terms"] == 5
+
+    stored_result = session.results_store[result["result_id"]]
+    full_report = stored_result["full_report"]
+
+    for _, row in full_report.iterrows():
+        feature = row["feature"]
+        r_val = row["spearman_r"]
+        assert feature in expected_spearman_r
+        assert r_val == pytest.approx(expected_spearman_r[feature], abs=1e-3)
