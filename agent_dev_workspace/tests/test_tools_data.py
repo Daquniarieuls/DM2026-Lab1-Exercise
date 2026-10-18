@@ -3,6 +3,7 @@ from agent_pipeline.session_state import SessionState
 from agent_pipeline.workspace_loader import load_workspace_tools
 from tools_data import make_tools
 
+
 def test_check_missing_tool_known_answer_2():
     # Single session reused for load_dataset_tool and check_missing_tool
     session = SessionState()
@@ -29,6 +30,7 @@ def test_check_missing_tool_known_answer_2():
     assert result["total_rows"] == 8
     assert result["missing_count"] == 1
     assert "result_id" in result
+
 
 def test_check_duplicates_tool_known_answer_3():
     # Fresh session for duplicate checking without dropping
@@ -79,3 +81,43 @@ def test_check_duplicates_tool_known_answer_3():
     assert result_drop["dropped"] is True
     assert result_drop["removed_indices"] == [5, 6]
     assert result_drop["total_rows_after"] == 6  # keep=False drops both copies
+
+
+def test_tokenize_tool_known_answer_10():
+    session = SessionState()
+
+    # Load premade load_dataset_tool
+    premade_tools, _ = load_workspace_tools("premade_tools", session)
+    load_dataset_tool = next(t for t in premade_tools if t.name == "load_dataset_tool")
+
+    # Load dataset into session
+    load_dataset_tool.invoke({
+        "file_path": "agent_dev/sample_fixture.csv",
+        "text_column": "text",
+        "label_column": "label"
+    })
+
+    # Instantiate student's tools_data tools
+    tools = make_tools(session)
+    tokenize_tool = next(t for t in tools if t.name == "tokenize_tool")
+
+    # Run tokenize_tool
+    result = tokenize_tool.invoke({"text_column": "text"})
+
+    assert "error" not in result, f"tokenize_tool failed with error: {result.get('error')}"
+    assert result["total_documents"] == 8
+
+    # Check unigrams stored in dataframe against Known Answer 10 from TEST_FIXTURE.md
+    expected_tokens = [
+        ["always", "alpha", "alpha", "alpha", "beta"],
+        ["always", "alpha", "alpha", "beta"],
+        ["always", "alpha", "beta"],
+        ["always", "gamma", "gamma", "gamma", "delta"],
+        ["always", "gamma", "gamma", "delta"],
+        ["always", "gamma", "delta"],
+        ["always", "gamma", "delta"],
+        [],
+    ]
+
+    actual_unigrams = session.dataframe["unigrams"].tolist()
+    assert actual_unigrams == expected_tokens

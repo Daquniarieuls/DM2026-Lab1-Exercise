@@ -1,5 +1,19 @@
+import pandas as pd
+import nltk
 from typing import List, Dict, Any, Optional
 from langchain_core.tools import tool
+
+# Ensure punkt data is available for nltk tokenizer if needed
+try:
+    nltk.data.find("tokenizers/punkt")
+except LookupError:
+    nltk.download("punkt", quiet=True)
+
+try:
+    nltk.data.find("tokenizers/punkt_tab")
+except LookupError:
+    nltk.download("punkt_tab", quiet=True)
+
 
 def make_tools(session):
     @tool
@@ -99,4 +113,49 @@ def make_tools(session):
 
         return summary
 
-    return [check_missing_tool, check_duplicates_tool]
+    @tool
+    def tokenize_tool(text_column: str = "text") -> Dict[str, Any]:
+        """Tokenizes each document's text into unigrams using NLTK word tokenizer.
+
+        Args:
+            text_column: Name of the column containing document text to tokenize.
+
+        Returns:
+            A summary dictionary containing result_id, total_documents, total_tokens, and sample_tokens.
+        """
+        if session.dataframe is None:
+            return {"error": "No dataset loaded in session. Please load a dataset first."}
+
+        df = session.dataframe
+        if text_column not in df.columns:
+            return {"error": f"Column '{text_column}' not found in dataset."}
+
+        all_tokens = []
+        for text in df[text_column]:
+            if pd.isna(text) or not str(text).strip():
+                all_tokens.append([])
+            else:
+                tokens = nltk.word_tokenize(str(text).lower())
+                all_tokens.append(tokens)
+
+        df["unigrams"] = all_tokens
+        session.artifacts["tokens"] = all_tokens
+
+        total_documents = len(df)
+        total_tokens = sum(len(t) for t in all_tokens)
+        sample_tokens = all_tokens[0] if len(all_tokens) > 0 else []
+
+        result_id = session.next_result_id("tokenize")
+
+        summary = {
+            "result_id": result_id,
+            "total_documents": total_documents,
+            "total_tokens": total_tokens,
+            "sample_tokens": sample_tokens,
+        }
+
+        session.store_result("tokenize_tool", {"text_column": text_column}, summary)
+
+        return summary
+
+    return [check_missing_tool, check_duplicates_tool, tokenize_tool]
