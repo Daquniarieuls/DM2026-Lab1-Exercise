@@ -1,5 +1,6 @@
 import pytest
 import pandas as pd
+import numpy as np
 from agent_pipeline.session_state import SessionState
 from agent_pipeline.workspace_loader import load_workspace_tools
 from tools_data import make_tools
@@ -224,3 +225,87 @@ def test_list_files_tool_known_answer_11():
     assert result["subdirectory"] == "newdataset"
     assert result["directories"] == []
     assert result["files"] == ["Reddit-stock-sentiment.csv"]
+
+
+def test_sample_data_tool_known_answer_13():
+    session = SessionState()
+
+    # Load premade load_dataset_tool
+    premade_tools, _ = load_workspace_tools("premade_tools", session)
+    load_dataset_tool = next(t for t in premade_tools if t.name == "load_dataset_tool")
+
+    # Load dataset into session
+    load_dataset_tool.invoke({
+        "file_path": "agent_dev/sample_fixture.csv",
+        "text_column": "text",
+        "label_column": "label"
+    })
+
+    tools = make_tools(session)
+    sample_data_tool = next(t for t in tools if t.name == "sample_data_tool")
+
+    # Call with n=4, random_state=42 matching Known Answer 13 in TEST_FIXTURE.md
+    result = sample_data_tool.invoke({"n": 4, "random_state": 42})
+
+    assert "result_id" in result
+    assert result["total_rows_before"] == 8
+    assert result["sampled_rows"] == 4
+    assert result["sample_indices"] == [1, 5, 0, 7]
+
+    # Verify that session.dataframe was updated and keeps original indices
+    assert len(session.dataframe) == 4
+    assert session.dataframe.index.tolist() == [1, 5, 0, 7]
+
+
+def test_describe_data_tool_known_answer_18():
+    session = SessionState()
+
+    premade_tools, _ = load_workspace_tools("premade_tools", session)
+    load_dataset_tool = next(t for t in premade_tools if t.name == "load_dataset_tool")
+
+    load_dataset_tool.invoke({
+        "file_path": "agent_dev/sample_fixture.csv",
+        "text_column": "text",
+        "label_column": "label"
+    })
+
+    tools = make_tools(session)
+    describe_data_tool = next(t for t in tools if t.name == "describe_data_tool")
+
+    result = describe_data_tool.invoke({})
+
+    assert "result_id" in result
+    assert session.pending_figure is not None
+
+    # Assert overall stats against Known Answer 18
+    overall = result["overall_stats"]
+    assert overall["count"] == 8
+    assert pytest.approx(overall["mean"], abs=1e-3) == 19.875
+    assert pytest.approx(overall["std"], abs=1e-3) == 9.4330
+    assert overall["min"] == 0
+    assert pytest.approx(overall["25%"], abs=1e-3) == 17.75
+    assert pytest.approx(overall["50%"], abs=1e-3) == 20.5
+    assert pytest.approx(overall["75%"], abs=1e-3) == 25.25
+    assert overall["max"] == 30
+
+    # Assert per-category stats for catA
+    catA = result["by_category_stats"]["catA"]
+    assert catA["count"] == 4
+    assert pytest.approx(catA["mean"], abs=1e-3) == 17.25
+    assert pytest.approx(catA["std"], abs=1e-3) == 12.5
+    assert catA["min"] == 0
+    assert pytest.approx(catA["25%"], abs=1e-3) == 12.75
+    assert pytest.approx(catA["50%"], abs=1e-3) == 20.0
+    assert pytest.approx(catA["75%"], abs=1e-3) == 24.5
+    assert catA["max"] == 29
+
+    # Assert per-category stats for catB
+    catB = result["by_category_stats"]["catB"]
+    assert catB["count"] == 4
+    assert pytest.approx(catB["mean"], abs=1e-3) == 22.5
+    assert pytest.approx(catB["std"], abs=1e-3) == 5.7446
+    assert catB["min"] == 18
+    assert pytest.approx(catB["25%"], abs=1e-3) == 18.0
+    assert pytest.approx(catB["50%"], abs=1e-3) == 21.0
+    assert pytest.approx(catB["75%"], abs=1e-3) == 25.5
+    assert catB["max"] == 30

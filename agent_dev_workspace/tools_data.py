@@ -1,6 +1,8 @@
 import os
 import pandas as pd
 import nltk
+import matplotlib.pyplot as plt
+import seaborn as sns
 from typing import List, Dict, Any, Optional
 from langchain_core.tools import tool
 
@@ -288,10 +290,129 @@ def make_tools(session):
 
         return summary
 
+    @tool
+    def sample_data_tool(
+        n: int,
+        random_state: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Subsamples n rows from session.dataframe, keeping original index and updating session.dataframe.
+
+        Args:
+            n: Number of sample rows to draw.
+            random_state: Random seed for reproducible sampling.
+
+        Returns:
+            A summary dictionary containing result_id, total_rows_before, sampled_rows, and sample_indices.
+        """
+        if session.dataframe is None:
+            return {"error": "No dataset loaded in session. Please load a dataset first."}
+
+        df = session.dataframe
+        total_rows = len(df)
+
+        if total_rows == 0:
+            return {"error": "Dataset in session is empty."}
+
+        if n <= 0:
+            return {"error": f"Invalid sample size n={n}. 'n' must be greater than 0."}
+
+        if n > total_rows:
+            return {"error": f"Requested sample size n={n} exceeds total dataset rows ({total_rows})."}
+
+        try:
+            sampled_df = df.sample(n=n, random_state=random_state)
+        except Exception as e:
+            return {"error": f"Sampling failed: {str(e)}"}
+
+        sample_indices = sampled_df.index.tolist()
+
+        # Update session.dataframe in place with the sampled subset (preserving original row indices)
+        session.dataframe = sampled_df
+
+        result_id = session.next_result_id("sample_data")
+
+        summary = {
+            "result_id": result_id,
+            "total_rows_before": total_rows,
+            "sampled_rows": len(sampled_df),
+            "sample_indices": sample_indices,
+        }
+
+        session.store_result(
+            "sample_data_tool",
+            {
+                "n": n,
+                "random_state": random_state,
+            },
+            summary
+        )
+
+        return summary
+
+    @tool
+    def describe_data_tool() -> Dict[str, Any]:
+        """Computes summary statistics on document text length overall and per category, and creates a boxplot figure.
+
+        Returns:
+            A summary dictionary containing result_id, overall_stats, and by_category_stats.
+        """
+        if session.dataframe is None:
+            return {"error": "No dataset loaded in session. Please load a dataset first."}
+
+        df = session.dataframe
+        if "text" not in df.columns:
+            return {"error": "Column 'text' not found in dataset."}
+
+        # Calculate character lengths on the fly without modifying session.dataframe
+        text_lengths = df["text"].fillna("").apply(len)
+
+        # Overall summary statistics
+        desc_overall = text_lengths.describe()
+        overall_stats = {stat: float(val) for stat, val in desc_overall.items()}
+
+        # Per-category summary statistics
+        by_category_stats = {}
+        if "category_name" in df.columns:
+            cat_df = df.copy()
+            cat_df["_temp_text_length"] = text_lengths
+            grouped = cat_df.groupby("category_name")["_temp_text_length"]
+            for cat_name, series in grouped:
+                cat_desc = series.describe()
+                by_category_stats[str(cat_name)] = {stat: float(val) for stat, val in cat_desc.items()}
+
+        # Create boxplot figure grouped by category
+        fig, ax = plt.subplots(figsize=(8, 5))
+        plot_df = pd.DataFrame({
+            "text_length": text_lengths,
+            "category_name": df["category_name"] if "category_name" in df.columns else "all"
+        })
+        sns.boxplot(x="category_name", y="text_length", data=plot_df, ax=ax)
+        ax.set_title("Document Text Length by Category")
+        ax.set_xlabel("Category")
+        ax.set_ylabel("Text Length (characters)")
+        plt.tight_layout()
+
+        # Set pending figure on session
+        session.pending_figure = fig
+
+        result_id = session.next_result_id("describe_data")
+
+        summary = {
+            "result_id": result_id,
+            "overall_stats": overall_stats,
+            "by_category_stats": by_category_stats,
+        }
+
+        session.store_result("describe_data_tool", {}, summary)
+
+        return summary
+
     return [
         check_missing_tool,
         check_duplicates_tool,
         tokenize_tool,
         inspect_data_tool,
         list_files_tool,
+        sample_data_tool,
+        describe_data_tool,
     ]
