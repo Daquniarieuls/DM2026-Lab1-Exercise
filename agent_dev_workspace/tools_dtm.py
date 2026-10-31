@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 from typing import Optional, List, Dict, Any
 from sklearn.feature_extraction.text import CountVectorizer
 from langchain_core.tools import tool
@@ -66,4 +68,117 @@ def make_tools(session):
         session.store_result("build_dtm_tool", {"max_features": max_features, "ngram_range": ngram_range, "stop_words": stop_words}, summary)
         return summary
 
-    return [build_dtm_tool]
+    @tool
+    def term_frequency_tool(
+        top_n: Optional[int] = 15
+    ) -> Dict[str, Any]:
+        """Aggregates term frequencies across all documents in session.feature_matrix.
+
+        Sums counts for each term across all documents, sort terms descending by total frequency
+        while preserving original vocabulary order for ties, and returns up to top_n terms.
+
+        Args:
+            top_n: Maximum number of top terms to return (default: 15).
+
+        Returns:
+            Dict containing result_id, total_terms, and frequencies (term-to-frequency map).
+        """
+        if session.dataframe is None or session.dataframe.empty:
+            return {"error": "No dataframe loaded in session. Load dataset first."}
+
+        if session.feature_matrix is None or session.feature_names is None:
+            return {"error": "No feature_matrix built in session. Run build_dtm_tool first."}
+
+        # Sum counts across all documents for each column
+        counts = np.asarray(session.feature_matrix.sum(axis=0)).ravel()
+        
+        # Build list of (original_index, term, count)
+        items = [
+            (idx, term, int(count))
+            for idx, (term, count) in enumerate(zip(session.feature_names, counts))
+        ]
+
+        # Stable sort by count descending, preserving original_index order for ties
+        items_sorted = sorted(items, key=lambda x: (-x[2], x[0]))
+
+        # Limit to top_n if specified and larger than total items
+        if top_n is not None and len(items_sorted) > top_n:
+            items_sorted = items_sorted[:top_n]
+
+        frequencies = {term: count for _, term, count in items_sorted}
+
+        result_id = session.next_result_id("tf")
+        summary = {
+            "result_id": result_id,
+            "total_terms": len(session.feature_names),
+            "returned_terms": len(frequencies),
+            "frequencies": frequencies
+        }
+
+        session.store_result("term_frequency_tool", {"top_n": top_n}, summary)
+        return summary
+
+    @tool
+    def dtm_heatmap_tool(
+        n_terms: int = 20,
+        n_documents: int = 20
+    ) -> Dict[str, Any]:
+        """Renders a heatmap of a raw positional slice of session.feature_matrix.
+
+        Extracts the first n_documents rows and n_terms columns from session.feature_matrix,
+        renders an annotated heatmap figure stored on session.pending_figure, and returns
+        the sliced matrix values as a nested list.
+
+        Args:
+            n_terms: Number of terms (columns) to slice from session.feature_names (default: 20).
+            n_documents: Number of documents (rows) to slice from session.dataframe (default: 20).
+
+        Returns:
+            Dict containing result_id, n_documents, n_terms, terms, document_indices, and matrix_slice.
+        """
+        if session.dataframe is None or session.dataframe.empty:
+            return {"error": "No dataframe loaded in session. Load dataset first."}
+
+        if session.feature_matrix is None or session.feature_names is None:
+            return {"error": "No feature_matrix built in session. Run build_dtm_tool first."}
+
+        total_docs, total_terms = session.feature_matrix.shape
+        actual_docs = min(n_documents, total_docs)
+        actual_terms = min(n_terms, total_terms)
+
+        matrix_slice = session.feature_matrix[:actual_docs, :actual_terms].toarray()
+        term_labels = session.feature_names[:actual_terms]
+        doc_indices = list(range(actual_docs))
+
+        # Build figure and render heatmap
+        fig, ax = plt.subplots(figsize=(max(6, actual_terms * 0.8), max(4, actual_docs * 0.4)))
+        sns.heatmap(
+            matrix_slice,
+            annot=True,
+            fmt="d",
+            cmap="YlGnBu",
+            xticklabels=term_labels,
+            yticklabels=[f"Doc {i}" for i in doc_indices],
+            ax=ax
+        )
+        ax.set_title(f"DTM Heatmap (First {actual_docs} Docs x {actual_terms} Terms)")
+        ax.set_xlabel("Terms")
+        ax.set_ylabel("Documents")
+        plt.tight_layout()
+
+        session.pending_figure = fig
+
+        result_id = session.next_result_id("dtm_heatmap")
+        summary = {
+            "result_id": result_id,
+            "n_documents": actual_docs,
+            "n_terms": actual_terms,
+            "terms": term_labels,
+            "document_indices": doc_indices,
+            "matrix_slice": matrix_slice.tolist()
+        }
+
+        session.store_result("dtm_heatmap_tool", {"n_terms": n_terms, "n_documents": n_documents}, summary)
+        return summary
+
+    return [build_dtm_tool, term_frequency_tool, dtm_heatmap_tool]
