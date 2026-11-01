@@ -56,7 +56,7 @@ I tell the agent to check of a specific column `text`.
 
 result ID: `describe_data_6`
 
-Overall Statistics:¶
+Overall Statistics:
 - Count: 2,257
 - Mean: 1,992.96
 - Std Dev: 3,547.66
